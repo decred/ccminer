@@ -65,3 +65,4 @@ env LD_LIBRARY_PATH="$PREF/lib" \
         ac_cv_path__libcurl_config=$PREF/bin/curl-config \
         ./configure --with-cuda=/opt/cuda >> build.log 2>&1
 make -j8 >> build.log 2>&1
+echo "Build complete."
