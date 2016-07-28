@@ -164,7 +164,7 @@
 #define PACKAGE_URL "http://github.com/tpruvot/ccminer"
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "0.1.0-decred"
+#define PACKAGE_VERSION "0.2.0-decred"
 
 /* If using the C implementation of alloca, define if you know the
    direction of stack growth for your system; otherwise it will be
