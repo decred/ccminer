@@ -1,10 +1,8 @@
-/*
- * X17 algorithm built on cbuchner1's original X11
- *
+/**
+ * X17 algorithm (X15 + sha512 + haval256)
  */
 
-extern "C"
-{
+extern "C" {
 #include "sph/sph_blake.h"
 #include "sph/sph_bmw.h"
 #include "sph/sph_groestl.h"
@@ -55,10 +53,12 @@ extern void x17_haval256_cpu_init(int thr_id, uint32_t threads);
 extern void x17_haval256_cpu_hash_64(int thr_id, uint32_t threads, uint32_t startNounce, uint32_t *d_nonceVector, uint32_t *d_hash, int order);
 
 
-// X17 Hashfunktion
+// X17 CPU Hash (Validation)
 extern "C" void x17hash(void *output, const void *input)
 {
-	// blake1-bmw2-grs3-skein4-jh5-keccak6-luffa7-cubehash8-shavite9-simd10-echo11-hamsi12-fugue13-shabal14-whirlpool15-sha512-haval17
+	unsigned char _ALIGN(64) hash[128];
+
+	// x11 + hamsi12-fugue13-shabal14-whirlpool15-sha512-haval256
 
 	sph_blake512_context ctx_blake;
 	sph_bmw512_context ctx_bmw;
@@ -78,8 +78,6 @@ extern "C" void x17hash(void *output, const void *input)
 	sph_sha512_context ctx_sha512;
 	sph_haval256_5_context ctx_haval;
 
-	unsigned char hash[128]; // uint32_t hashA[16], hashB[16];
-	#define hashB hash+64
 
 	sph_blake512_init(&ctx_blake);
 	sph_blake512(&ctx_blake, input, 80);
@@ -199,12 +197,14 @@ extern "C" int scanhash_x17(int thr_id, struct work* work, uint32_t max_nonce, u
 		init[thr_id] = true;
 	}
 
-	uint32_t endiandata[20];
+	uint32_t _ALIGN(64) endiandata[20];
 	for (int k=0; k < 20; k++)
 		be32enc(&endiandata[k], pdata[k]);
 
 	quark_blake512_cpu_setBlock_80(thr_id, endiandata);
 	cuda_check_cpu_setTarget(ptarget);
+
+	int warn = 0;
 
 	do {
 		int order = 0;
@@ -233,7 +233,7 @@ extern "C" int scanhash_x17(int thr_id, struct work* work, uint32_t max_nonce, u
 		if (foundNonce != UINT32_MAX)
 		{
 			const uint32_t Htarg = ptarget[7];
-			uint32_t vhash64[8];
+			uint32_t _ALIGN(64) vhash64[8];
 			be32enc(&endiandata[19], foundNonce);
 			x17hash(vhash64, endiandata);
 
@@ -252,7 +252,13 @@ extern "C" int scanhash_x17(int thr_id, struct work* work, uint32_t max_nonce, u
 				pdata[19] = foundNonce;
 				return res;
 			} else {
-				gpulog(LOG_WARNING, thr_id, "result for %08x does not validate on CPU!", foundNonce);
+				// x11+ coins could do some random error, but not on retry
+				if (!warn) {
+					warn++; continue;
+				} else {
+					gpulog(LOG_WARNING, thr_id, "result for %08x does not validate on CPU!", foundNonce);
+					warn = 0;
+				}
 			}
 		}
 

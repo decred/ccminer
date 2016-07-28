@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-#include "cpuminer-config.h"
+#include <ccminer-config.h>
 
 #include <stdbool.h>
 #include <inttypes.h>
@@ -67,7 +67,8 @@ typedef char *  va_list;
 
 #ifdef HAVE_SYSLOG_H
 #include <syslog.h>
-#define LOG_BLUE 0x10 /* unique value */
+#define LOG_BLUE 0x10
+#define LOG_RAW  0x99
 #else
 enum {
 	LOG_ERR,
@@ -77,6 +78,7 @@ enum {
 	LOG_DEBUG,
 	/* custom notices */
 	LOG_BLUE = 0x10,
+	LOG_RAW  = 0x99
 };
 #endif
 
@@ -273,6 +275,7 @@ extern int scanhash_fugue256(int thr_id, struct work* work, uint32_t max_nonce, 
 extern int scanhash_groestlcoin(int thr_id, struct work* work, uint32_t max_nonce, unsigned long *hashes_done);
 extern int scanhash_heavy(int thr_id,struct work *work, uint32_t max_nonce, unsigned long *hashes_done, uint32_t maxvote, int blocklen);
 extern int scanhash_jackpot(int thr_id, struct work* work, uint32_t max_nonce, unsigned long *hashes_done);
+extern int scanhash_lbry(int thr_id, struct work *work, uint32_t max_nonce, unsigned long *hashes_done);
 extern int scanhash_luffa(int thr_id, struct work* work, uint32_t max_nonce, unsigned long *hashes_done);
 extern int scanhash_lyra2(int thr_id, struct work* work, uint32_t max_nonce, unsigned long *hashes_done);
 extern int scanhash_lyra2v2(int thr_id,struct work* work, uint32_t max_nonce, unsigned long *hashes_done);
@@ -288,6 +291,7 @@ extern int scanhash_skein2(int thr_id, struct work* work, uint32_t max_nonce, un
 extern int scanhash_s3(int thr_id, struct work* work, uint32_t max_nonce, unsigned long *hashes_done);
 extern int scanhash_vanilla(int thr_id, struct work* work, uint32_t max_nonce, unsigned long *hashes_done, int8_t blake_rounds);
 extern int scanhash_whirl(int thr_id, struct work* work, uint32_t max_nonce, unsigned long *hashes_done);
+extern int scanhash_x11evo(int thr_id, struct work* work, uint32_t max_nonce, unsigned long *hashes_done);
 extern int scanhash_x11(int thr_id, struct work* work, uint32_t max_nonce, unsigned long *hashes_done);
 extern int scanhash_x13(int thr_id, struct work* work, uint32_t max_nonce, unsigned long *hashes_done);
 extern int scanhash_x14(int thr_id, struct work* work, uint32_t max_nonce, unsigned long *hashes_done);
@@ -331,6 +335,7 @@ extern void free_skein2(int thr_id);
 extern void free_s3(int thr_id);
 extern void free_vanilla(int thr_id);
 extern void free_whirl(int thr_id);
+extern void free_x11evo(int thr_id);
 extern void free_x11(int thr_id);
 extern void free_x13(int thr_id);
 extern void free_x14(int thr_id);
@@ -361,6 +366,7 @@ struct cgpu_info {
 	int gpu_clock;
 	int gpu_memclock;
 	size_t gpu_mem;
+	size_t gpu_memfree;
 	uint32_t gpu_power;
 	double gpu_vddc;
 	int16_t gpu_pstate;
@@ -459,6 +465,7 @@ extern bool want_longpoll;
 extern bool have_longpoll;
 extern bool want_stratum;
 extern bool have_stratum;
+extern bool opt_stratum_stats;
 extern char *opt_cert;
 extern char *opt_proxy;
 extern long opt_proxy_type;
@@ -481,6 +488,7 @@ extern double net_diff;
 extern double stratum_diff;
 
 #define MAX_GPUS 16
+//#define MAX_THREADS 32 todo
 extern char* device_name[MAX_GPUS];
 extern short device_map[MAX_GPUS];
 extern long  device_sm[MAX_GPUS];
@@ -493,7 +501,9 @@ void cuda_devicenames();
 void cuda_reset_device(int thr_id, bool *init);
 void cuda_shutdown();
 int cuda_finddevice(char *name);
+int cuda_version();
 void cuda_print_devices();
+int cuda_gpu_info(struct cgpu_info *gpu);
 int cuda_available_memory(int thr_id);
 
 uint32_t cuda_default_throughput(int thr_id, uint32_t defcount);
@@ -575,6 +585,7 @@ struct stratum_job {
 	unsigned char version[4];
 	unsigned char nbits[4];
 	unsigned char ntime[4];
+	unsigned char claim[32]; // lbry
 	bool clean;
 	unsigned char nreward[2];
 	uint32_t height;
@@ -665,13 +676,14 @@ struct pool_infos {
 	int algo;
 	char name[64];
 	// credentials
-	char url[256];
+	char url[512];
 	char short_url[64];
 	char user[64];
-	char pass[128];
+	char pass[384];
 	// config options
 	double max_diff;
 	double max_rate;
+	int shares_limit;
 	int time_limit;
 	int scantime;
 	// connection
@@ -787,6 +799,7 @@ void heavycoin_hash(unsigned char* output, const unsigned char* input, int len);
 void keccak256_hash(void *state, const void *input);
 unsigned int jackpothash(void *state, const void *input);
 void groestlhash(void *state, const void *input);
+void lbry_hash(void *output, const void *input);
 void lyra2re_hash(void *state, const void *input);
 void lyra2v2_hash(void *state, const void *input);
 void myriadhash(void *state, const void *input);
@@ -803,6 +816,7 @@ void skein2hash(void *output, const void *input);
 void s3hash(void *output, const void *input);
 void wcoinhash(void *state, const void *input);
 void whirlxHash(void *state, const void *input);
+void x11evo_hash(void *output, const void *input);
 void x11hash(void *output, const void *input);
 void x13hash(void *output, const void *input);
 void x14hash(void *output, const void *input);

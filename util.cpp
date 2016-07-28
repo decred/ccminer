@@ -10,7 +10,7 @@
  */
 
 //#define _GNU_SOURCE
-#include "cpuminer-config.h"
+#include <ccminer-config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -104,10 +104,10 @@ void applog(int prio, const char *fmt, ...)
 #endif
 	else {
 		const char* color = "";
+		const time_t now = time(NULL);
 		char *f;
 		int len;
 		struct tm tm;
-		time_t now = time(NULL);
 
 		localtime_r(&now, &tm);
 
@@ -139,6 +139,10 @@ void applog(int prio, const char *fmt, ...)
 			fmt,
 			use_colors ? CL_N : ""
 		);
+		if (prio == LOG_RAW) {
+			// no time prefix, for ccminer -n
+			sprintf(f, "%s%s\n", fmt, CL_N);
+		}
 		pthread_mutex_lock(&applog_lock);
 		vfprintf(stdout, f, ap);	/* atomic write to stdout */
 		fflush(stdout);
@@ -614,7 +618,7 @@ err_out:
 json_t *json_rpc_call_pool(CURL *curl, struct pool_infos *pool, const char *req,
 	bool longpoll_scan, bool longpoll, int *curl_err)
 {
-	char userpass[256];
+	char userpass[512];
 	// todo, malloc and store that in pool array
 	snprintf(userpass, sizeof(userpass), "%s%c%s", pool->user,
 		strlen(pool->pass)?':':'\0', pool->pass);
@@ -625,7 +629,7 @@ json_t *json_rpc_call_pool(CURL *curl, struct pool_infos *pool, const char *req,
 /* called only from longpoll thread, we have the lp_url */
 json_t *json_rpc_longpoll(CURL *curl, char *lp_url, struct pool_infos *pool, const char *req, int *curl_err)
 {
-	char userpass[256];
+	char userpass[512];
 	snprintf(userpass, sizeof(userpass), "%s%c%s", pool->user,
 		strlen(pool->pass)?':':'\0', pool->pass);
 
@@ -1417,28 +1421,39 @@ static uint32_t getblocheight(struct stratum_ctx *sctx)
 
 static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 {
-	const char *job_id, *prevhash, *coinb1, *coinb2, *version, *nbits, *stime, *nreward;
+	const char *job_id, *prevhash, *coinb1, *coinb2, *version, *nbits, *stime;
+	const char *claim = NULL, *nreward = NULL;
 	size_t coinb1_size, coinb2_size;
 	bool clean, ret = false;
-	int merkle_count, i;
+	int merkle_count, i, p=0;
 	json_t *merkle_arr;
 	uchar **merkle = NULL;
 	// uchar(*merkle_tree)[32] = { 0 };
 	int ntime;
+	char algo[64] = { 0 };
+	get_currentalgo(algo, sizeof(algo));
+	bool has_claim = !strcasecmp(algo, "lbry");
 
-	job_id = json_string_value(json_array_get(params, 0));
-	prevhash = json_string_value(json_array_get(params, 1));
-	coinb1 = json_string_value(json_array_get(params, 2));
-	coinb2 = json_string_value(json_array_get(params, 3));
-	merkle_arr = json_array_get(params, 4);
+	job_id = json_string_value(json_array_get(params, p++));
+	prevhash = json_string_value(json_array_get(params, p++));
+	if (has_claim) {
+		claim = json_string_value(json_array_get(params, p++));
+		if (!claim || strlen(claim) != 64) {
+			applog(LOG_ERR, "Stratum notify: invalid claim parameter");
+			goto out;
+		}
+	}
+	coinb1 = json_string_value(json_array_get(params, p++));
+	coinb2 = json_string_value(json_array_get(params, p++));
+	merkle_arr = json_array_get(params, p++);
 	if (!merkle_arr || !json_is_array(merkle_arr))
 		goto out;
 	merkle_count = (int) json_array_size(merkle_arr);
-	version = json_string_value(json_array_get(params, 5));
-	nbits = json_string_value(json_array_get(params, 6));
-	stime = json_string_value(json_array_get(params, 7));
-	clean = json_is_true(json_array_get(params, 8));
-	nreward = json_string_value(json_array_get(params, 9));
+	version = json_string_value(json_array_get(params, p++));
+	nbits = json_string_value(json_array_get(params, p++));
+	stime = json_string_value(json_array_get(params, p++));
+	clean = json_is_true(json_array_get(params, p)); p++;
+	nreward = json_string_value(json_array_get(params, p++));
 
 	if (!job_id || !prevhash || !coinb1 || !coinb2 || !version || !nbits || !stime ||
 	    strlen(prevhash) != 64 || strlen(version) != 8 ||
@@ -1490,6 +1505,7 @@ static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 	free(sctx->job.job_id);
 	sctx->job.job_id = strdup(job_id);
 	hex2bin(sctx->job.prevhash, prevhash, 32);
+	if (has_claim) hex2bin(sctx->job.claim, claim, 32);
 
 	sctx->job.height = getblocheight(sctx);
 
@@ -1561,21 +1577,166 @@ static bool stratum_reconnect(struct stratum_ctx *sctx, json_t *params)
 	return true;
 }
 
-static bool stratum_get_version(struct stratum_ctx *sctx, json_t *id)
+static bool stratum_pong(struct stratum_ctx *sctx, json_t *id)
+{
+	char buf[64];
+	bool ret = false;
+
+	if (!id || json_is_null(id))
+		return ret;
+
+	sprintf(buf, "{\"id\":%d,\"result\":\"pong\",\"error\":null}",
+		(int) json_integer_value(id));
+	ret = stratum_send_line(sctx, buf);
+
+	return ret;
+}
+
+static bool stratum_get_algo(struct stratum_ctx *sctx, json_t *id, json_t *params)
+{
+	char algo[64] = { 0 };
+	char *s;
+	json_t *val;
+	bool ret = true;
+
+	if (!id || json_is_null(id))
+		return false;
+
+	get_currentalgo(algo, sizeof(algo));
+
+	val = json_object();
+	json_object_set(val, "id", id);
+	json_object_set_new(val, "error", json_null());
+	json_object_set_new(val, "result", json_string(algo));
+
+	s = json_dumps(val, 0);
+	ret = stratum_send_line(sctx, s);
+	json_decref(val);
+	free(s);
+
+	return ret;
+}
+
+#include "nvml.h"
+extern char driver_version[32];
+extern int cuda_arch[MAX_GPUS];
+
+static bool json_object_set_error(json_t *result, int code, const char *msg)
+{
+	json_t *val = json_object();
+	json_object_set_new(val, "code", json_integer(code));
+	json_object_set_new(val, "message", json_string(msg));
+	return json_object_set_new(result, "error", val) != -1;
+}
+
+/* allow to report algo/device perf to the pool for algo stats */
+static bool stratum_benchdata(json_t *result, json_t *params, int thr_id)
+{
+	char algo[64] = { 0 };
+	char vid[32], arch[8], driver[32];
+	char *card;
+	char os[8];
+	uint32_t watts = 0;
+	int dev_id = device_map[thr_id];
+	int cuda_ver = cuda_version();
+	struct cgpu_info *cgpu = &thr_info[thr_id].gpu;
+	json_t *val;
+
+	if (!cgpu || !opt_stratum_stats) return false;
+
+#if defined(WIN32) && (defined(_M_X64) || defined(__x86_64__))
+	strcpy(os, "win64");
+#else
+	strcpy(os, is_windows() ? "win32" : "linux");
+#endif
+
+	cuda_gpu_info(cgpu);
+#ifdef USE_WRAPNVML
+	cgpu->has_monitoring = true;
+	cgpu->gpu_power = gpu_power(cgpu); // mWatts
+	watts = (cgpu->gpu_power >= 1000) ? cgpu->gpu_power / 1000 : 0; // ignore nvapi %
+	gpu_info(cgpu);
+#endif
+	get_currentalgo(algo, sizeof(algo));
+
+	card = device_name[dev_id];
+	cgpu->khashes = stats_get_speed(thr_id, 0.0) / 1000.0;
+
+	sprintf(vid, "%04hx:%04hx", cgpu->gpu_vid, cgpu->gpu_pid);
+	sprintf(arch, "%d", (int) cgpu->gpu_arch);
+	if (cuda_arch[dev_id] > 0 && cuda_arch[dev_id] != cgpu->gpu_arch) {
+		// if binary was not compiled for the highest cuda arch, add it
+		snprintf(arch, 8, "%d@%d", (int) cgpu->gpu_arch, cuda_arch[dev_id]);
+	}
+	snprintf(driver, 32, "CUDA %d.%d %s", cuda_ver/1000, (cuda_ver%1000) / 10, driver_version);
+	driver[31] = '\0';
+
+	val = json_object();
+	json_object_set_new(val, "algo", json_string(algo));
+	json_object_set_new(val, "type", json_string("gpu"));
+	json_object_set_new(val, "device", json_string(card));
+	json_object_set_new(val, "vendorid", json_string(vid));
+	json_object_set_new(val, "arch", json_string(arch));
+	json_object_set_new(val, "freq", json_integer(cgpu->gpu_clock/1000));
+	json_object_set_new(val, "memf", json_integer(cgpu->gpu_memclock/1000));
+	json_object_set_new(val, "power", json_integer(watts));
+	json_object_set_new(val, "khashes", json_real(cgpu->khashes));
+	json_object_set_new(val, "intensity", json_real(cgpu->intensity));
+	json_object_set_new(val, "throughput", json_integer(cgpu->throughput));
+	json_object_set_new(val, "client", json_string(PACKAGE_NAME "/" PACKAGE_VERSION));
+	json_object_set_new(val, "os", json_string(os));
+	json_object_set_new(val, "driver", json_string(driver));
+
+	json_object_set_new(result, "result", val);
+
+	return true;
+}
+
+static bool stratum_get_stats(struct stratum_ctx *sctx, json_t *id, json_t *params)
 {
 	char *s;
 	json_t *val;
 	bool ret;
-	
+
 	if (!id || json_is_null(id))
 		return false;
 
 	val = json_object();
 	json_object_set(val, "id", id);
-	json_object_set_new(val, "error", json_null());
-	json_object_set_new(val, "result", json_string(USER_AGENT));
+
+	ret = stratum_benchdata(val, params, 0);
+
+	if (!ret) {
+		json_object_set_error(val, 1, "disabled"); //EPERM
+	} else {
+		json_object_set_new(val, "error", json_null());
+	}
+
 	s = json_dumps(val, 0);
 	ret = stratum_send_line(sctx, s);
+	json_decref(val);
+	free(s);
+
+	return ret;
+}
+
+static bool stratum_get_version(struct stratum_ctx *sctx, json_t *id, json_t *params)
+{
+	char *s;
+	json_t *val;
+	bool ret = true;
+
+	if (!id || json_is_null(id))
+		return false;
+
+	val = json_object();
+	json_object_set(val, "id", id);
+	json_object_set_new(val, "result", json_string(USER_AGENT));
+	if (ret) json_object_set_new(val, "error", json_null());
+
+	s = json_dumps(val, 0);
+	ret = stratum_send_line(sctx, s);
+
 	json_decref(val);
 	free(s);
 
@@ -1607,6 +1768,28 @@ static bool stratum_show_message(struct stratum_ctx *sctx, json_t *id, json_t *p
 	return ret;
 }
 
+static bool stratum_unknown_method(struct stratum_ctx *sctx, json_t *id)
+{
+	char *s;
+	json_t *val;
+	bool ret = false;
+
+	if (!id || json_is_null(id))
+		return ret;
+
+	val = json_object();
+	json_object_set(val, "id", id);
+	json_object_set_new(val, "result", json_false());
+	json_object_set_error(val, 38, "unknown method"); // ENOSYS
+
+	s = json_dumps(val, 0);
+	ret = stratum_send_line(sctx, s);
+	json_decref(val);
+	free(s);
+
+	return ret;
+}
+
 bool stratum_handle_method(struct stratum_ctx *sctx, const char *s)
 {
 	json_t *val, *id, *params;
@@ -1630,6 +1813,11 @@ bool stratum_handle_method(struct stratum_ctx *sctx, const char *s)
 		ret = stratum_notify(sctx, params);
 		goto out;
 	}
+	if (!strcasecmp(method, "mining.ping")) { // cgminer 4.7.1+
+		if (opt_debug) applog(LOG_DEBUG, "Pool ping");
+		ret = stratum_pong(sctx, id);
+		goto out;
+	}
 	if (!strcasecmp(method, "mining.set_difficulty")) {
 		ret = stratum_set_difficulty(sctx, params);
 		goto out;
@@ -1642,13 +1830,30 @@ bool stratum_handle_method(struct stratum_ctx *sctx, const char *s)
 		ret = stratum_reconnect(sctx, params);
 		goto out;
 	}
-	if (!strcasecmp(method, "client.get_version")) {
-		ret = stratum_get_version(sctx, id);
+	if (!strcasecmp(method, "client.get_algo")) { // ccminer only yet!
+		// will prevent wrong algo parameters on a pool, will be used as test on rejects
+		if (!opt_quiet) applog(LOG_NOTICE, "Pool asked your algo parameter");
+		ret = stratum_get_algo(sctx, id, params);
 		goto out;
 	}
-	if (!strcasecmp(method, "client.show_message")) {
+	if (!strcasecmp(method, "client.get_stats")) { // ccminer/yiimp only yet!
+		// optional to fill device benchmarks
+		ret = stratum_get_stats(sctx, id, params);
+		goto out;
+	}
+	if (!strcasecmp(method, "client.get_version")) { // common
+		ret = stratum_get_version(sctx, id, params);
+		goto out;
+	}
+	if (!strcasecmp(method, "client.show_message")) { // common
 		ret = stratum_show_message(sctx, id, params);
 		goto out;
+	}
+
+	if (!ret) {
+		// don't fail = disconnect stratum on unknown (and optional?) methods
+		if (opt_debug) applog(LOG_WARNING, "unknown stratum method %s!", method);
+		ret = stratum_unknown_method(sctx, id);
 	}
 
 out:
@@ -1886,7 +2091,8 @@ void do_gpu_tests(void)
 	//scanhash_scrypt_jane(0, &work, NULL, 1, &done, &tv, &tv);
 
 	memset(work.data, 0, sizeof(work.data));
-	scanhash_decred(0, &work, 1, &done);
+	work.data[0] = 0;
+	scanhash_lbry(0, &work, 1, &done);
 
 	free(work_restart);
 	work_restart = NULL;
@@ -1949,6 +2155,10 @@ void print_hash_tests(void)
 	keccak256_hash(&hash[0], &buf[0]);
 	printpfx("keccak", hash);
 
+	memset(buf, 0, 128);
+	lbry_hash(&hash[0], &buf[0]);
+	printpfx("lbry", hash);
+
 	luffa_hash(&hash[0], &buf[0]);
 	printpfx("luffa", hash);
 
@@ -2002,6 +2212,9 @@ void print_hash_tests(void)
 
 	//whirlxHash(&hash[0], &buf[0]);
 	//printpfx("whirlpoolx", hash);
+
+	x11evo_hash(&hash[0], &buf[0]);
+	printpfx("x11evo", hash);
 
 	x11hash(&hash[0], &buf[0]);
 	printpfx("X11", hash);

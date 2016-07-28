@@ -82,6 +82,9 @@
     <Filter Include="Source Files\CUDA\lyra2">
       <UniqueIdentifier>{1613763f-895c-4321-b58b-6f5849868956}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\CUDA\lbry">
+      <UniqueIdentifier>{3079ea1f-f768-455a-acd6-f517fac535b4}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="compat\jansson\dump.c">
@@ -150,9 +153,6 @@
     <ClCompile Include="sph\luffa.c">
       <Filter>Source Files\sph</Filter>
     </ClCompile>
-    <ClCompile Include="sph\md_helper.c">
-      <Filter>Source Files\sph</Filter>
-    </ClCompile>
     <ClCompile Include="sph\sha2.c">
       <Filter>Source Files\sph</Filter>
     </ClCompile>
@@ -180,7 +180,10 @@
     <ClCompile Include="sph\haval.c">
       <Filter>Source Files\sph</Filter>
     </ClCompile>
-    <ClCompile Include="sph\haval_helper.c">
+    <ClCompile Include="sph\ripemd.c">
+      <Filter>Source Files\sph</Filter>
+    </ClCompile>
+    <ClCompile Include="sph\sph_sha2.c">
       <Filter>Source Files\sph</Filter>
     </ClCompile>
     <ClCompile Include="sph\sha2big.c">
@@ -219,6 +222,9 @@
     <ClCompile Include="compat\jansson\error.c">
       <Filter>Source Files\jansson</Filter>
     </ClCompile>
+    <ClInclude Include="compat\pthreads\pthread.h">
+      <Filter>Header Files\compat</Filter>
+    </ClInclude>
     <ClCompile Include="lyra2\Lyra2.c">
       <Filter>Source Files\sph</Filter>
     </ClCompile>
@@ -261,13 +267,16 @@
     <ClCompile Include="sph\blake2s.c">
       <Filter>Source Files\sph</Filter>
     </ClCompile>
+    <ClCompile Include="nvapi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="algos.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="compat.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\compat</Filter>
     </ClInclude>
     <ClInclude Include="elist.h">
       <Filter>Header Files</Filter>
@@ -290,8 +299,8 @@
     <ClInclude Include="compat\stdbool.h">
       <Filter>Header Files\compat</Filter>
     </ClInclude>
-    <ClInclude Include="cpuminer-config.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="compat\ccminer-config.h">
+      <Filter>Header Files\compat</Filter>
     </ClInclude>
     <ClInclude Include="uint256.h">
       <Filter>Header Files</Filter>
@@ -568,6 +577,9 @@
     <CudaCompile Include="x11\x11.cu">
       <Filter>Source Files\CUDA\x11</Filter>
     </CudaCompile>
+    <CudaCompile Include="x11\x11evo.cu">
+      <Filter>Source Files\CUDA\x11</Filter>
+    </CudaCompile>
     <CudaCompile Include="x13\cuda_x13_fugue512.cu">
       <Filter>Source Files\CUDA\x13</Filter>
     </CudaCompile>
@@ -595,7 +607,7 @@
     <CudaCompile Include="x15\whirlpool.cu">
       <Filter>Source Files\CUDA\x15</Filter>
     </CudaCompile>
-    <CudaCompile Include="x17\cuda_x17_haval512.cu">
+    <CudaCompile Include="x17\cuda_x17_haval256.cu">
       <Filter>Source Files\CUDA\x17</Filter>
     </CudaCompile>
     <CudaCompile Include="x17\cuda_x17_sha512.cu">
@@ -711,6 +723,15 @@
     </CudaCompile>
     <CudaCompile Include="Algo256\blake2s.cu">
       <Filter>Source Files\CUDA\Algo256</Filter>
+    </CudaCompile>
+    <CudaCompile Include="lbry\cuda_sha256_lbry.cu">
+      <Filter>Source Files\CUDA\lbry</Filter>
+    </CudaCompile>
+    <CudaCompile Include="lbry\cuda_sha512_lbry.cu">
+      <Filter>Source Files\CUDA\lbry</Filter>
+    </CudaCompile>
+    <CudaCompile Include="lbry\lbry.cu">
+      <Filter>Source Files\CUDA\lbry</Filter>
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>

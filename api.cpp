@@ -101,8 +101,6 @@ extern struct stratum_ctx stratum;
 extern int num_cpus;
 extern float cpu_temp(int);
 extern uint32_t cpu_clock(int);
-// cuda.cpp
-extern int cuda_gpu_clocks(struct cgpu_info *gpu);
 
 char driver_version[32] = { 0 };
 
@@ -118,15 +116,15 @@ static void gpustatus(int thr_id)
 		char buf[512]; *buf = '\0';
 		char* card;
 
+		cuda_gpu_info(cgpu);
 #ifdef USE_WRAPNVML
 		cgpu->has_monitoring = true;
 		cgpu->gpu_bus = gpu_busid(cgpu);
 		cgpu->gpu_temp = gpu_temp(cgpu);
 		cgpu->gpu_fan = (uint16_t) gpu_fanpercent(cgpu);
 		cgpu->gpu_fan_rpm = (uint16_t) gpu_fanrpm(cgpu);
-		cgpu->gpu_power = gpu_power(cgpu);
+		cgpu->gpu_power = gpu_power(cgpu); // mWatts
 #endif
-		cuda_gpu_clocks(cgpu);
 
 		// todo: per gpu
 		cgpu->accepted = p->accepted_count;
@@ -256,6 +254,7 @@ static void gpuhwinfos(int gpu_id)
 	if (cgpu == NULL)
 		return;
 
+	cuda_gpu_info(cgpu);
 #ifdef USE_WRAPNVML
 	cgpu->has_monitoring = true;
 	cgpu->gpu_bus = gpu_busid(cgpu);
@@ -265,9 +264,10 @@ static void gpuhwinfos(int gpu_id)
 	cgpu->gpu_pstate = (int16_t) gpu_pstate(cgpu);
 	cgpu->gpu_power = gpu_power(cgpu);
 	gpu_info(cgpu);
+#ifdef WIN32
+	if (opt_debug) nvapi_pstateinfo(cgpu->gpu_id);
 #endif
-
-	cuda_gpu_clocks(cgpu);
+#endif
 
 	memset(pstate, 0, sizeof(pstate));
 	if (cgpu->gpu_pstate != -1)
@@ -275,10 +275,10 @@ static void gpuhwinfos(int gpu_id)
 
 	card = device_name[gpu_id];
 
-	snprintf(buf, sizeof(buf), "GPU=%d;BUS=%hd;CARD=%s;SM=%u;MEM=%lu;"
+	snprintf(buf, sizeof(buf), "GPU=%d;BUS=%hd;CARD=%s;SM=%hu;MEM=%u;"
 		"TEMP=%.1f;FAN=%hu;RPM=%hu;FREQ=%d;MEMFREQ=%d;PST=%s;POWER=%u;"
 		"VID=%hx;PID=%hx;NVML=%d;NVAPI=%d;SN=%s;BIOS=%s|",
-		gpu_id, cgpu->gpu_bus, card, cgpu->gpu_arch, cgpu->gpu_mem,
+		gpu_id, cgpu->gpu_bus, card, cgpu->gpu_arch, (uint32_t) cgpu->gpu_mem,
 		cgpu->gpu_temp, cgpu->gpu_fan, cgpu->gpu_fan_rpm,
 		cgpu->gpu_clock, cgpu->gpu_memclock,
 		pstate, cgpu->gpu_power,

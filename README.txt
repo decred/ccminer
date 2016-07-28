@@ -1,5 +1,5 @@
 
-ccMiner release 1.7.5 (Mar 2015) "Blake2-S"
+ccMiner 1.8 (20th July 2016)    "CUDA 8, lbry and x11evo algos"
 ---------------------------------------------------------------
 
 ***************************************************************
@@ -28,6 +28,7 @@ Decred (Blake256 14-rounds - 180 bytes)
 HeavyCoin & MjollnirCoin
 FugueCoin
 GroestlCoin & Myriad-Groestl
+Lbry Credits
 JackpotCoin
 QuarkCoin family & AnimeCoin
 TalkCoin
@@ -35,13 +36,13 @@ DarkCoin and other X11 coins
 Chaincoin and Flaxscript (C11)
 Saffroncoin blake (256 14-rounds)
 BlakeCoin (256 8-rounds)
-Midnight (BMW 256)
 Qubit (Digibyte, ...)
 Luffa (Joincoin)
 Keccak (Maxcoin)
 Pentablake (Blake 512 x5)
 1Coin Triple S
 Neoscrypt (FeatherCoin)
+Revolver (X11evo)
 Scrypt and Scrypt:N
 Scrypt-Jane (Chacha)
 Sibcoin (sib)
@@ -82,6 +83,7 @@ its command line interface and options.
                           heavy       use to mine Heavycoin
                           jackpot     use to mine Jackpotcoin
                           keccak      use to mine Maxcoin
+                          lbry        use to mine LBRY Credits
                           luffa       use to mine Joincoin
                           lyra2       use to mine Vertcoin
                           mjollnir    use to mine Mjollnircoin
@@ -98,6 +100,7 @@ its command line interface and options.
                           sib         use to mine Sibcoin
                           skein       use to mine Skeincoin
                           skein2      use to mine Woodcoin
+                          x11evo      use to mine Revolver
                           x11         use to mine DarkCoin
                           x14         use to mine X14Coin
                           x15         use to mine Halcyon
@@ -129,6 +132,7 @@ its command line interface and options.
   -r, --retries=N       number of times to retry if a network call fails
                           (default: retry indefinitely)
   -R, --retry-pause=N   time to pause between retries, in seconds (default: 15)
+      --shares-limit    maximum shares to mine before exiting the program.
       --time-limit      maximum time [s] to mine before exiting the program.
   -T, --timeout=N       network timeout, in seconds (default: 300)
   -s, --scantime=N      upper bound on time spent scanning current work when
@@ -149,6 +153,7 @@ its command line interface and options.
       --max-diff=N      Only mine if net difficulty is less than specified value
       --pstate=0        will force the Geforce 9xx to run in P0 P-State
       --plimit=150W     set the gpu power limit, allow multiple values for N cards
+      --tlimit=85       Set the gpu thermal limit (windows only)
       --keep-clocks     prevent reset clocks and/or power limit on exit
       --show-diff       display submitted block and net difficulty
   -B, --background      run the miner in the background
@@ -238,19 +243,34 @@ features.
 
 >>> RELEASE HISTORY <<<
 
-  Mar. 13th 2015  v1.7.5
+  July 20th 2016  v1.8.0
+                  Pascal support with cuda 8
+                  lbry new multi sha / ripemd algo (LBC)
+                  x11evo algo (XRE)
+                  Lyra2v2, Neoscrypt and Decred improvements
+                  Enhance windows NVAPI clock and power limits
+                  Led support for mining/shares activity on windows
+
+  May  18th 2016  v1.7.6
+                  Decred vote support
+                  X17 cleanup and improvement
+                  Add mining.ping stratum method and handle unknown methods
+                  Implement a pool stats/benchmark mode (-p stats on yiimp)
+                  Add --shares-limit parameter, can be used for benchmarks
+
+  Mar. 13th 2016  v1.7.5
                   Blake2S Algo (NEVA/OXEN)
 
-  Feb. 28th 2015  v1.7.4 (1.7.3 was a preview, not official)
+  Feb. 28th 2016  v1.7.4 (1.7.3 was a preview, not official)
                   Decred simplified stratum (getwork over stratum)
                   Vanilla kernel by MrMad
                   Drop/Disable WhirlpoolX
 
-  Feb. 11th 2015  v1.7.2
+  Feb. 11th 2016  v1.7.2
                   Decred Algo (longpoll only)
                   Blake256 improvements/cleanup
 
-  Jan. 26th 2015  v1.7.1
+  Jan. 26th 2016  v1.7.1
                   Implement sib algo (X11 + Russian Streebog-512/GOST)
                   Whirlpool speed x2 with the midstate precompute
                   Small bug fixes about device ids mapping (and vendor names)

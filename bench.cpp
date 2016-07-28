@@ -71,6 +71,7 @@ void algo_free_all(int thr_id)
 	free_s3(thr_id);
 	free_vanilla(thr_id);
 	free_whirl(thr_id);
+	free_x11evo(thr_id);
 	free_x11(thr_id);
 	free_x13(thr_id);
 	free_x14(thr_id);
@@ -200,4 +201,3 @@ void bench_display_results()
 		}
 	}
 }
-

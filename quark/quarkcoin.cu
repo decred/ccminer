@@ -265,7 +265,7 @@ extern "C" int scanhash_quark(int thr_id, struct work* work, uint32_t max_nonce,
 			foundNonce = cuda_check_hash(thr_id, throughput, pdata[19], d_hash[thr_id]);
 		}
 
-		*hashes_done = pdata[19] - first_nonce + 1;
+		*hashes_done = pdata[19] - first_nonce + throughput;
 
 		if (foundNonce != UINT32_MAX)
 		{
@@ -288,13 +288,13 @@ extern "C" int scanhash_quark(int thr_id, struct work* work, uint32_t max_nonce,
 
 	} while (pdata[19] < max_nonce && !work_restart[thr_id].restart);
 
-	*hashes_done = pdata[19] - first_nonce + 1;
 	return 0;
 }
 
 // cleanup
 extern "C" void free_quark(int thr_id)
 {
+	int dev_id = device_map[thr_id];
 	if (!init[thr_id])
 		return;
 
@@ -302,9 +302,13 @@ extern "C" void free_quark(int thr_id)
 
 	cudaFree(d_hash[thr_id]);
 
-	cudaFree(d_branch1Nonces[thr_id]);
-	cudaFree(d_branch2Nonces[thr_id]);
-	cudaFree(d_branch3Nonces[thr_id]);
+	if (cuda_arch[dev_id] >= 300) {
+		cudaFree(d_branch1Nonces[thr_id]);
+		cudaFree(d_branch2Nonces[thr_id]);
+		cudaFree(d_branch3Nonces[thr_id]);
+	} else {
+		cudaFree(d_hash_br2[thr_id]);
+	}
 
 	quark_blake512_cpu_free(thr_id);
 	quark_groestl512_cpu_free(thr_id);

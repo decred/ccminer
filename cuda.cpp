@@ -52,6 +52,11 @@ int cuda_num_devices()
 	return GPU_N;
 }
 
+int cuda_version()
+{
+	return (int) CUDART_VERSION;
+}
+
 void cuda_devicenames()
 {
 	cudaError_t err;
@@ -100,7 +105,17 @@ void cuda_print_devices()
 		cudaDeviceProp props;
 		cudaGetDeviceProperties(&props, dev_id);
 		if (!opt_n_threads || n < opt_n_threads) {
-			fprintf(stderr, "GPU #%d: SM %d.%d %s\n", dev_id, props.major, props.minor, device_name[dev_id]);
+			fprintf(stderr, "GPU #%d: SM %d.%d %s @ %.0f MHz (MEM %.0f)\n", dev_id, props.major, props.minor,
+				device_name[dev_id], (double) props.clockRate/1000, (double) props.memoryClockRate/1000);
+#ifdef USE_WRAPNVML
+			if (opt_debug) nvml_print_device_info(dev_id);
+#ifdef WIN32
+			if (opt_debug) {
+				unsigned int devNum = nvapi_devnum(dev_id);
+				nvapi_pstateinfo(devNum);
+			}
+#endif
+#endif
 		}
 	}
 }
@@ -188,9 +203,15 @@ void cuda_reset_device(int thr_id, bool *init)
 int cuda_available_memory(int thr_id)
 {
 	int dev_id = device_map[thr_id % MAX_GPUS];
-	size_t mtotal, mfree = 0;
+	size_t mtotal = 0, mfree = 0;
+#if defined(_WIN32) && defined(USE_WRAPNVML)
+	// cuda (6.5) one can crash on pascal and dont handle 8GB
+	nvapiMemGetInfo(dev_id, &mfree, &mtotal);
+#else
 	cudaSetDevice(dev_id);
+	cudaDeviceSynchronize();
 	cudaMemGetInfo(&mfree, &mtotal);
+#endif
 	return (int) (mfree / (1024 * 1024));
 }
 
@@ -212,13 +233,18 @@ void cuda_clear_lasterror()
 } /* extern "C" */
 #endif
 
-int cuda_gpu_clocks(struct cgpu_info *gpu)
+int cuda_gpu_info(struct cgpu_info *gpu)
 {
 	cudaDeviceProp props;
 	if (cudaGetDeviceProperties(&props, gpu->gpu_id) == cudaSuccess) {
 		gpu->gpu_clock = props.clockRate;
 		gpu->gpu_memclock = props.memoryClockRate;
-		gpu->gpu_mem = props.totalGlobalMem;
+		gpu->gpu_mem = (props.totalGlobalMem / 1024); // kB
+#if defined(_WIN32) && defined(USE_WRAPNVML)
+		// required to get mem size > 4GB (size_t too small for bytes on 32bit)
+		nvapiMemGetInfo(gpu->gpu_id, &gpu->gpu_memfree, &gpu->gpu_mem); // kB
+#endif
+		gpu->gpu_mem = gpu->gpu_mem / 1024; // MB
 		return 0;
 	}
 	return -1;

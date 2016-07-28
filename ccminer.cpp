@@ -9,7 +9,7 @@
  * any later version.  See COPYING for more details.
  */
 
-#include "cpuminer-config.h"
+#include <ccminer-config.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -104,6 +104,7 @@ bool opt_quiet = false;
 static int opt_retries = -1;
 static int opt_fail_pause = 30;
 int opt_time_limit = -1;
+int opt_shares_limit = -1;
 time_t firstwork_time = 0;
 int opt_timeout = 300; // curl
 int opt_scantime = 10;
@@ -127,7 +128,10 @@ uint32_t gpus_intensity[MAX_GPUS] = { 0 };
 uint32_t device_gpu_clocks[MAX_GPUS] = { 0 };
 uint32_t device_mem_clocks[MAX_GPUS] = { 0 };
 uint32_t device_plimit[MAX_GPUS] = { 0 };
-int8_t device_pstate[MAX_GPUS] = { -1 };
+uint8_t device_tlimit[MAX_GPUS] = { 0 };
+int8_t device_pstate[MAX_GPUS] = { -1, -1 };
+int32_t device_led[MAX_GPUS] = { -1, -1 };
+int opt_led_mode = 0;
 int opt_cudaschedule = -1;
 static bool opt_keep_clocks = false;
 
@@ -204,6 +208,8 @@ char *opt_api_allow = strdup("127.0.0.1"); /* 0.0.0.0 for all ips */
 int opt_api_remote = 0;
 int opt_api_listen = 4068; /* 0 to disable */
 
+bool opt_stratum_stats = false;
+
 static char const usage[] = "\
 Usage: " PROGRAM_NAME " [OPTIONS]\n\
 Options:\n\
@@ -222,6 +228,7 @@ Options:\n\
 			heavy       Heavycoin\n\
 			jackpot     Jackpot\n\
 			keccak      Keccak-256 (Maxcoin)\n\
+			lbry        LBRY Credits (Sha/Ripemd)\n\
 			luffa       Joincoin\n\
 			lyra2       LyraBar\n\
 			lyra2v2     VertCoin\n\
@@ -238,6 +245,7 @@ Options:\n\
 			skein       Skein SHA2 (Skeincoin)\n\
 			skein2      Double Skein (Woodcoin)\n\
 			s3          S3 (1Coin)\n\
+			x11evo      Permuted x11 (Revolver)\n\
 			x11         X11 (DarkCoin)\n\
 			x13         X13 (MaruCoin)\n\
 			x14         X14\n\
@@ -268,6 +276,7 @@ Options:\n\
   -r, --retries=N       number of times to retry if a network call fails\n\
                           (default: retry indefinitely)\n\
   -R, --retry-pause=N   time to pause between retries, in seconds (default: 30)\n\
+      --shares-limit    maximum shares [s] to mine before exiting the program.\n\
       --time-limit      maximum time [s] to mine before exiting the program.\n\
   -T, --timeout=N       network timeout, in seconds (default: 300)\n\
   -s, --scantime=N      upper bound on time spent scanning current work when\n\
@@ -290,12 +299,19 @@ Options:\n\
       --max-rate=N[KMG] Only mine if net hashrate is less than specified value\n\
       --max-diff=N      Only mine if net difficulty is less than specified value\n\
                         Can be tuned with --resume-diff=N to set a resume value\n"
-#if defined(USE_WRAPNVML) && (defined(__linux) || defined(_WIN64)) /* via nvml */
+#if defined(__linux) || defined(_WIN64) /* via nvml */
 "\
       --mem-clock=3505  Set the gpu memory max clock (346.72+ driver)\n\
       --gpu-clock=1150  Set the gpu engine max clock (346.72+ driver)\n\
       --pstate=0[,2]    Set the gpu power state (352.21+ driver)\n\
       --plimit=100W     Set the gpu power limit (352.21+ driver)\n"
+#else /* via nvapi.dll */
+"\
+      --mem-clock=3505  Set the gpu memory boost clock\n\
+      --gpu-clock=1150  Set the gpu engine boost clock\n\
+      --plimit=100      Set the gpu power limit in percentage\n\
+      --tlimit=80       Set the gpu thermal limit in degrees\n\
+      --led=100         Set the logo led level (0=disable, 0xFF00FF for RVB)\n"
 #endif
 #ifdef HAVE_SYSLOG_H
 "\
@@ -354,6 +370,7 @@ struct option options[] = {
 	{ "pool-name", 1, NULL, 1100 },     // pool
 	{ "pool-algo", 1, NULL, 1101 },     // pool
 	{ "pool-scantime", 1, NULL, 1102 }, // pool
+	{ "pool-shares-limit", 1, NULL, 1109 },
 	{ "pool-time-limit", 1, NULL, 1108 },
 	{ "pool-max-diff", 1, NULL, 1161 }, // pool
 	{ "pool-max-rate", 1, NULL, 1162 }, // pool
@@ -371,10 +388,13 @@ struct option options[] = {
 	{ "pstate", 1, NULL, 1072 },
 	{ "plimit", 1, NULL, 1073 },
 	{ "keep-clocks", 0, NULL, 1074 },
+	{ "tlimit", 1, NULL, 1075 },
+	{ "led", 1, NULL, 1080 },
 #ifdef HAVE_SYSLOG_H
 	{ "syslog", 0, NULL, 'S' },
 	{ "syslog-prefix", 1, NULL, 1018 },
 #endif
+	{ "shares-limit", 1, NULL, 1009 },
 	{ "time-limit", 1, NULL, 1008 },
 	{ "threads", 1, NULL, 't' },
 	{ "vote", 1, NULL, 1022 },
@@ -548,6 +568,7 @@ static void calc_network_diff(struct work *work)
 	// sample for diff 43.281 : 1c05ea29
 	// todo: endian reversed on longpoll could be zr5 specific...
 	uint32_t nbits = have_longpoll ? work->data[18] : swab32(work->data[18]);
+	if (opt_algo == ALGO_LBRY) nbits = swab32(work->data[26]);
 	if (opt_algo == ALGO_DECRED) nbits = work->data[29];
 	uint32_t bits = (nbits & 0xffffff);
 	int16_t shift = (swab32(nbits) & 0xff); // 0x1c = 28
@@ -817,6 +838,11 @@ static bool submit_upstream_work(CURL *curl, struct work *work)
 			le32enc(&ntime, work->data[17]);
 			le32enc(&nonce, work->data[19]);
 			be16enc(&nvote, *((uint16_t*)&work->data[20]));
+			break;
+		case ALGO_LBRY:
+			check_dups = true;
+			le32enc(&ntime, work->data[25]);
+			le32enc(&nonce, work->data[27]);
 			break;
 		case ALGO_ZR5:
 			check_dups = true;
@@ -1237,7 +1263,11 @@ static void *workio_thread(void *userdata)
 			ok = workio_get_work(wc, curl);
 			break;
 		case WC_SUBMIT_WORK:
+			if (opt_led_mode == LED_MODE_SHARES)
+				gpu_led_on(device_map[wc->thr->id]);
 			ok = workio_submit_work(wc, curl);
+			if (opt_led_mode == LED_MODE_SHARES)
+				gpu_led_off(device_map[wc->thr->id]);
 			break;
 		case WC_ABORT:
 		default:		/* should never happen */
@@ -1273,6 +1303,8 @@ bool get_work(struct thr_info *thr, struct work *work)
 		memset(work->data + 19, 0x00, 52);
 		if (opt_algo == ALGO_DECRED) {
 			memset(&work->data[35], 0x00, 52);
+		} else if (opt_algo == ALGO_LBRY) {
+			work->data[28] = 0x80000000;
 		} else {
 			work->data[20] = 0x80000000;
 			work->data[31] = 0x00000280;
@@ -1418,6 +1450,14 @@ static bool stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 		work->data[37] = (rand()*4) << 8; // random work data
 		sctx->job.height = work->data[32];
 		//applog_hex(work->data, 180);
+	} else if (opt_algo == ALGO_LBRY) {
+		for (i = 0; i < 8; i++)
+			work->data[9 + i] = be32dec((uint32_t *)merkle_root + i);
+		for (i = 0; i < 8; i++)
+			work->data[17 + i] = ((uint32_t*)sctx->job.claim)[i];
+		work->data[25] = le32dec(sctx->job.ntime);
+		work->data[26] = le32dec(sctx->job.nbits);
+		work->data[28] = 0x80000000;
 	} else {
 		for (i = 0; i < 8; i++)
 			work->data[9 + i] = be32dec((uint32_t *)merkle_root + i);
@@ -1475,6 +1515,7 @@ static bool stratum_gen_work(struct stratum_ctx *sctx, struct work *work)
 		case ALGO_FRESH:
 		case ALGO_FUGUE256:
 		case ALGO_GROESTL:
+		case ALGO_LBRY:
 		case ALGO_LYRA2v2:
 			work_set_target(work, sctx->job.diff / (256.0 * opt_difficulty));
 			break;
@@ -1624,6 +1665,8 @@ static void *miner_thread(void *userdata)
 		}
 	}
 
+	gpu_led_off(dev_id);
+
 	while (!abort_flag) {
 		struct timeval tv_start, tv_end, diff;
 		unsigned long hashes_done;
@@ -1633,6 +1676,7 @@ static void *miner_thread(void *userdata)
 
 		// &work.data[19]
 		int wcmplen = (opt_algo == ALGO_DECRED) ? 140 : 76;
+		if (opt_algo == ALGO_LBRY) wcmplen = 108;
 		int wcmpoft = 0;
 		uint32_t *nonceptr = (uint32_t*) (((char*)work.data) + wcmplen);
 
@@ -1804,8 +1848,7 @@ static void *miner_thread(void *userdata)
 			int remain = (int)(opt_time_limit - passed);
 			if (remain < 0)  {
 				if (thr_id != 0) {
-					sleep(1);
-					continue;
+					sleep(1); continue;
 				}
 				if (num_pools > 1 && pools[cur_pooln].time_limit > 0) {
 					if (!pool_is_switching) {
@@ -1830,13 +1873,42 @@ static void *miner_thread(void *userdata)
 					usleep(200*1000);
 					fprintf(stderr, "%llu\n", (long long unsigned int) global_hashrate);
 				} else {
-					applog(LOG_NOTICE,
-						"Mining timeout of %ds reached, exiting...", opt_time_limit);
+					applog(LOG_NOTICE, "Mining timeout of %ds reached, exiting...", opt_time_limit);
 				}
 				workio_abort();
 				break;
 			}
 			if (remain < max64) max64 = remain;
+		}
+
+		/* shares limit */
+		if (opt_shares_limit > 0 && firstwork_time) {
+			int64_t shares = (pools[cur_pooln].accepted_count + pools[cur_pooln].rejected_count);
+			if (shares >= opt_shares_limit) {
+				int passed = (int)(time(NULL) - firstwork_time);
+				if (thr_id != 0) {
+					sleep(1); continue;
+				}
+				if (num_pools > 1 && pools[cur_pooln].shares_limit > 0) {
+					if (!pool_is_switching) {
+						if (!opt_quiet)
+							applog(LOG_INFO, "Pool shares limit of %d reached, rotate...", opt_shares_limit);
+						pool_switch_next(thr_id);
+					} else if (passed > 35) {
+						// ensure we dont stay locked if pool_is_switching is not reset...
+						applog(LOG_WARNING, "Pool switch to %d timed out...", cur_pooln);
+						if (!thr_id) pools[cur_pooln].wait_time += 1;
+						pool_is_switching = false;
+					}
+					sleep(1);
+					continue;
+				}
+				abort_flag = true;
+				app_exit_code = EXIT_CODE_OK;
+				applog(LOG_NOTICE, "Mining limit of %d shares reached, exiting...", opt_shares_limit);
+				workio_abort();
+				break;
+			}
 		}
 
 		max64 *= (uint32_t)thr_hashrates[thr_id];
@@ -1857,6 +1929,7 @@ static void *miner_thread(void *userdata)
 				minmax = 0x40000000U;
 				break;
 			case ALGO_KECCAK:
+			case ALGO_LBRY:
 			case ALGO_LUFFA:
 			case ALGO_SKEIN:
 			case ALGO_SKEIN2:
@@ -1867,6 +1940,7 @@ static void *miner_thread(void *userdata)
 			case ALGO_HEAVY:
 			case ALGO_LYRA2v2:
 			case ALGO_S3:
+			case ALGO_X11EVO:
 			case ALGO_X11:
 			case ALGO_X13:
 			case ALGO_WHIRLCOIN:
@@ -1916,6 +1990,9 @@ static void *miner_thread(void *userdata)
 
 		gpulog(LOG_DEBUG, thr_id, "start=%08x end=%08x range=%08x",
 			start_nonce, max_nonce, (max_nonce-start_nonce));
+
+		if (opt_led_mode == LED_MODE_MINING)
+			gpu_led_on(dev_id);
 
 		hashes_done = 0;
 		gettimeofday(&tv_start, NULL);
@@ -1978,6 +2055,9 @@ static void *miner_thread(void *userdata)
 		case ALGO_JACKPOT:
 			rc = scanhash_jackpot(thr_id, &work, max_nonce, &hashes_done);
 			break;
+		case ALGO_LBRY:
+			rc = scanhash_lbry(thr_id, &work, max_nonce, &hashes_done);
+			break;
 		case ALGO_LUFFA:
 			rc = scanhash_luffa(thr_id, &work, max_nonce, &hashes_done);
 			break;
@@ -2032,6 +2112,9 @@ static void *miner_thread(void *userdata)
 		//case ALGO_WHIRLPOOLX:
 		//	rc = scanhash_whirlx(thr_id, &work, max_nonce, &hashes_done);
 		//	break;
+		case ALGO_X11EVO:
+			rc = scanhash_x11evo(thr_id, &work, max_nonce, &hashes_done);
+			break;
 		case ALGO_X11:
 			rc = scanhash_x11(thr_id, &work, max_nonce, &hashes_done);
 			break;
@@ -2056,6 +2139,9 @@ static void *miner_thread(void *userdata)
 			goto out;
 		}
 
+		if (opt_led_mode == LED_MODE_MINING)
+			gpu_led_off(dev_id);
+
 		if (abort_flag)
 			break; // time to leave the mining loop...
 
@@ -2067,7 +2153,7 @@ static void *miner_thread(void *userdata)
 
 		// todo: update all algos to use work->nonces
 		work.nonces[0] = nonceptr[0];
-		if (opt_algo != ALGO_DECRED && opt_algo != ALGO_BLAKE2S) {
+		if (opt_algo != ALGO_DECRED && opt_algo != ALGO_BLAKE2S && opt_algo != ALGO_LBRY) {
 			work.nonces[1] = nonceptr[2];
 		}
 
@@ -2150,6 +2236,8 @@ static void *miner_thread(void *userdata)
 
 		/* if nonce found, submit work */
 		if (rc > 0 && !opt_benchmark) {
+			if (opt_led_mode == LED_MODE_SHARES)
+				gpu_led_percent(dev_id, 50);
 			if (!submit_work(mythr, &work))
 				break;
 
@@ -2178,6 +2266,8 @@ static void *miner_thread(void *userdata)
 	}
 
 out:
+	if (opt_led_mode)
+		gpu_led_off(dev_id);
 	if (opt_debug_threads)
 		applog(LOG_DEBUG, "%s() died", __func__);
 	tq_freeze(mythr->q);
@@ -2645,7 +2735,9 @@ void parse_arg(int key, char *arg)
 		#ifdef USE_WRAPNVML
 		hnvml = nvml_create();
 		#ifdef WIN32
-		if (!hnvml) nvapi_init();
+		nvapi_init();
+		cuda_devicenames(); // req for leds
+		nvapi_init_settings();
 		#endif
 		#endif
 		cuda_print_devices();
@@ -2889,6 +2981,38 @@ void parse_arg(int key, char *arg)
 	case 1074: /* --keep-clocks */
 		opt_keep_clocks = true;
 		break;
+	case 1075: /* --tlimit */
+		{
+			char *pch = strtok(arg,",");
+			int n = 0;
+			while (pch != NULL && n < MAX_GPUS) {
+				int dev_id = device_map[n++];
+				device_tlimit[dev_id] = (uint8_t) atoi(pch);
+				pch = strtok(NULL, ",");
+			}
+		}
+		break;
+	case 1080: /* --led */
+		{
+			if (!opt_led_mode)
+				opt_led_mode = LED_MODE_SHARES;
+			char *pch = strtok(arg,",");
+			int n = 0, lastval, val;
+			while (pch != NULL && n < MAX_GPUS) {
+				int dev_id = device_map[n++];
+				char * p = strstr(pch, "0x");
+				val = p ? (int32_t) strtoul(p, NULL, 16) : atoi(pch);
+				if (!val && !strcmp(pch, "mining"))
+					opt_led_mode = LED_MODE_MINING;
+				else if (device_led[dev_id] == -1)
+					device_led[dev_id] = lastval = val;
+				pch = strtok(NULL, ",");
+			}
+			if (lastval) while (n < MAX_GPUS) {
+				device_led[n++] = lastval;
+			}
+		}
+		break;
 	case 1005:
 		opt_benchmark = true;
 		want_longpoll = false;
@@ -2908,6 +3032,9 @@ void parse_arg(int key, char *arg)
 		break;
 	case 1008:
 		opt_time_limit = atoi(arg);
+		break;
+	case 1009:
+		opt_shares_limit = atoi(arg);
 		break;
 	case 1011:
 		allow_gbt = false;
@@ -3043,6 +3170,9 @@ void parse_arg(int key, char *arg)
 	case 1108: /* pool time-limit */
 		pool_set_attr(cur_pooln, "time-limit", arg);
 		break;
+	case 1109: /* pool shares-limit (1.7.6) */
+		pool_set_attr(cur_pooln, "shares-limit", arg);
+		break;
 	case 1161: /* pool max-diff */
 		pool_set_attr(cur_pooln, "max-diff", arg);
 		break;
@@ -3146,7 +3276,7 @@ static void parse_cmdline(int argc, char *argv[])
 		show_usage_and_exit(1);
 	}
 
-	if (opt_algo == ALGO_DECRED && opt_vote == 9999) {
+	if (opt_vote == 9999) {
 		opt_vote = 0; // default, don't vote
 	}
 }
@@ -3204,7 +3334,7 @@ int main(int argc, char *argv[])
 
 	printf("*** ccminer " PACKAGE_VERSION " for nVidia GPUs by tpruvot@github ***\n");
 #ifdef _MSC_VER
-	printf("    Built with VC++ 2013 and nVidia CUDA SDK %d.%d\n\n",
+	printf("    Built with VC++ %d and nVidia CUDA SDK %d.%d\n\n", msver(),
 #else
 	printf("    Built with the nVidia CUDA Toolkit %d.%d\n\n",
 #endif
@@ -3255,6 +3385,7 @@ int main(int argc, char *argv[])
 		device_texturecache[i] = -1;
 		device_singlememory[i] = -1;
 		device_pstate[i] = -1;
+		device_led[i] = -1;
 	}
 
 	cuda_devicenames();
@@ -3456,13 +3587,14 @@ int main(int argc, char *argv[])
 	if (hnvml) {
 		bool gpu_reinit = (opt_cudaschedule >= 0); //false
 		cuda_devicenames(); // refresh gpu vendor name
-		applog(LOG_INFO, "NVML GPU monitoring enabled.");
+		if (!opt_quiet)
+			applog(LOG_INFO, "NVML GPU monitoring enabled.");
 		for (int n=0; n < active_gpus; n++) {
 			if (nvml_set_pstate(hnvml, device_map[n]) == 1)
 				gpu_reinit = true;
 			if (nvml_set_plimit(hnvml, device_map[n]) == 1)
 				gpu_reinit = true;
-			if (nvml_set_clocks(hnvml, device_map[n]) == 1)
+			if (!is_windows() && nvml_set_clocks(hnvml, device_map[n]) == 1)
 				gpu_reinit = true;
 			if (gpu_reinit) {
 				cuda_reset_device(n, NULL);
@@ -3470,20 +3602,25 @@ int main(int argc, char *argv[])
 		}
 	}
 #endif
+#ifdef WIN32
+	if (nvapi_init() == 0) {
+		if (!opt_quiet)
+			applog(LOG_INFO, "NVAPI GPU monitoring enabled.");
+		if (!hnvml) {
+			cuda_devicenames(); // refresh gpu vendor name
+		}
+		nvapi_init_settings();
+	}
+#endif
+	else if (!hnvml && !opt_quiet)
+		applog(LOG_INFO, "GPU monitoring is not available.");
+
 	// force reinit to set default device flags
 	if (opt_cudaschedule >= 0 && !hnvml) {
 		for (int n=0; n < active_gpus; n++) {
 			cuda_reset_device(n, NULL);
 		}
 	}
-#ifdef WIN32
-	if (!hnvml && nvapi_init() == 0) {
-		applog(LOG_INFO, "NVAPI GPU monitoring enabled.");
-		cuda_devicenames(); // refresh gpu vendor name
-	}
-#endif
-	else if (!hnvml)
-		applog(LOG_INFO, "GPU monitoring is not available.");
 #endif
 
 	if (opt_api_listen) {

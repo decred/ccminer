@@ -4,7 +4,7 @@ AC_PREREQ([2.59c])
 AC_CANONICAL_SYSTEM
 AC_CONFIG_SRCDIR([ccminer.cpp])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
-AC_CONFIG_HEADERS([cpuminer-config.h])
+AC_CONFIG_HEADERS([ccminer-config.h])
 
 dnl Make sure anyone changing configure.ac/Makefile.am has a clue
 AM_MAINTAINER_MODE
@@ -75,12 +75,6 @@ AC_CHECK_LIB([pthread], [pthread_create], PTHREAD_LIBS="-lpthread",
 AC_CHECK_LIB([z],[gzopen], [], [])
 AC_CHECK_LIB([ssl],[SSL_library_init], [], [AC_MSG_ERROR([OpenSSL library required])])
 AC_CHECK_LIB([crypto],[EVP_DigestFinal_ex], [], [AC_MSG_ERROR([OpenSSL library required])])
-
-# libpci-dev (to get vendor name)
-PCILIB=""; PCIFLAGS=""
-AC_CHECK_LIB([pci],[pci_alloc], PCILIB="-lpci"; PCIFLAGS="-DHAVE_PCIDEV", [])
-AC_SUBST(PCILIB)
-AC_SUBST(PCIFLAGS)
 
 AM_CONDITIONAL([WANT_JANSSON], [test x$request_jansson = xtrue])
 AM_CONDITIONAL([HAVE_WINDOWS], [test x$have_win32 = xtrue])

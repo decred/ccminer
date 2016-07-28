@@ -9,7 +9,7 @@ endif
 
 EXTRA_DIST		= autogen.sh README.md README.txt LICENSE.txt \
 			  ccminer.sln ccminer.vcxproj ccminer.vcxproj.filters \
-			  compat/gettimeofday.c compat/getopt/getopt_long.c cpuminer-config.h.in
+			  compat/gettimeofday.c compat/getopt/getopt_long.c
 
 SUBDIRS = compat
 
@@ -50,14 +50,16 @@ ccminer_SOURCES	= elist.h miner.h compat.h \
 			  sph/cubehash.c sph/echo.c sph/luffa.c sph/sha2.c sph/shavite.c sph/simd.c \
 			  sph/hamsi.c sph/hamsi_helper.c sph/streebog.c \
 			  sph/shabal.c sph/whirlpool.c sph/sha2big.c sph/haval.c \
+			  sph/ripemd.c sph/sph_sha2.c \
+			  lbry/lbry.cu lbry/cuda_sha256_lbry.cu lbry/cuda_sha512_lbry.cu \
 			  qubit/qubit.cu qubit/qubit_luffa512.cu qubit/deep.cu qubit/luffa.cu \
 			  x11/x11.cu x11/fresh.cu x11/cuda_x11_luffa512.cu x11/cuda_x11_cubehash512.cu \
 			  x11/cuda_x11_shavite512.cu x11/cuda_x11_simd512.cu x11/cuda_x11_echo.cu \
-			  x11/cuda_x11_luffa512_Cubehash.cu \
+			  x11/cuda_x11_luffa512_Cubehash.cu x11/x11evo.cu \
 			  x13/x13.cu x13/cuda_x13_hamsi512.cu x13/cuda_x13_fugue512.cu \
 			  x15/x14.cu x15/x15.cu x15/cuda_x14_shabal512.cu x15/cuda_x15_whirlpool.cu \
 			  x15/whirlpool.cu \
-			  x17/x17.cu x17/cuda_x17_haval512.cu x17/cuda_x17_sha512.cu \
+			  x17/x17.cu x17/cuda_x17_haval256.cu x17/cuda_x17_sha512.cu \
 			  x11/c11.cu x11/s3.cu x11/sib.cu x11/cuda_streebog.cu
 
 # scrypt
@@ -77,8 +79,8 @@ ccminer_SOURCES += compat/winansi.c
 endif
 
 ccminer_LDFLAGS  = $(PTHREAD_FLAGS) @CUDA_LDFLAGS@
-ccminer_LDADD    = @LIBCURL@ @JANSSON_LIBS@ @PTHREAD_LIBS@ @WS2_LIBS@ @CUDA_LIBS@ @PCILIB@ @OPENMP_CFLAGS@ @LIBS@ $(nvml_libs)
-ccminer_CPPFLAGS = @LIBCURL_CPPFLAGS@ @PCIFLAGS@ @OPENMP_CFLAGS@ $(CPPFLAGS) $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES) $(DEF_INCLUDES) $(nvml_defs)
+ccminer_LDADD    = @LIBCURL@ @JANSSON_LIBS@ @PTHREAD_LIBS@ @WS2_LIBS@ @CUDA_LIBS@ @OPENMP_CFLAGS@ @LIBS@ $(nvml_libs)
+ccminer_CPPFLAGS = @LIBCURL_CPPFLAGS@ @OPENMP_CFLAGS@ $(CPPFLAGS) $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES) $(DEF_INCLUDES) $(nvml_defs)
 
 nvcc_ARCH  = -gencode=arch=compute_50,code=\"sm_50,compute_50\"
 
@@ -156,8 +158,5 @@ scrypt/titan_kernel.o: scrypt/titan_kernel.cu
 	$(NVCC) $(nvcc_FLAGS) -gencode=arch=compute_35,code=\"sm_35,compute_35\" -o $@ -c $<
 
 skein.o: skein.cu
-	$(NVCC) $(nvcc_FLAGS) --maxrregcount=64 -o $@ -c $<
-
-skein2.o: skein2.cu
 	$(NVCC) $(nvcc_FLAGS) --maxrregcount=64 -o $@ -c $<
 
