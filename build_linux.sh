@@ -56,6 +56,11 @@ CC=clang Cxx=clang++ ./configure --without-shared --enable-static --prefix=$PREF
 make install >> build.log 2>&1
 cd ..
 
+# gcc6/clang on arch don't work so just force to gcc5 for now
+export PATH="$PATH:/opt/cuda/bin/"
+export CC="gcc-5"
+export CXX="g++-5"
+
 echo "Building ccminer."
 cd ..
 cd ccminer
